@@ -10,6 +10,7 @@ def _():
     import polars as pl
     import json
     import simple_gtf
+    import lets_plot as lp
 
     return json, mo, pl, simple_gtf
 
@@ -141,7 +142,30 @@ def _(annot, gene_mapping, pl):
 
 @app.cell
 def _(annot, pl):
-    annot.filter(pl.col("feature").is_in(['gene', 'transcript']), gene_name = "CD99P1")
+    annot.filter(pl.col("feature").is_in(['gene', 'transcript']), gene_id = "ENSG00000279170")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Similarity to parent gene
+    """)
+    return
+
+
+@app.cell
+def _(gene_mapping, pl):
+    gene_mapping.select(
+        "pseudogene_id",
+        "pseudogene_gene_id", 
+        "gene_id",
+        pl.col("length"),
+        pl.col("slen"),
+        pl.col("qlen"),
+        length_frac = pl.col("length") / pl.col("slen"),
+        pident = "pident",
+    )
     return
 
 

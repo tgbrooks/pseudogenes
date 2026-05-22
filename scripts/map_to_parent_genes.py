@@ -99,7 +99,7 @@ BLASTN_RESULTS_FILE = "processed/pseudogene_blastn.csv"
 blastn_results = []
 for i, tx_file in enumerate(config["HUMAN_TRANSCRIPTOME_FA"]):
     res = subprocess.run(
-        f'''bash -c "blastn -subject <(zcat {tx_file}) -query <(zcat {PSEUDOGENE_SEQ_FILE}) -outfmt '10 qseqid sseqid pident nident gaps evalue qseq sseq sstrand qstart qend sstart send length'"''',
+        f'''bash -c "blastn -subject <(zcat {tx_file}) -query <(zcat {PSEUDOGENE_SEQ_FILE}) -outfmt '10 qseqid sseqid qlen slen pident nident gaps evalue qseq sseq sstrand qstart qend sstart send length'"''',
         shell=True,
         check=True,
         stdout=subprocess.PIPE,
@@ -107,7 +107,7 @@ for i, tx_file in enumerate(config["HUMAN_TRANSCRIPTOME_FA"]):
     blastn_results.append(res.stdout.decode())
 with open(BLASTN_RESULTS_FILE, "wt") as out:
     out.write(
-        "qseqid,sseqid,pident,nident,gaps,evalue,qseq,sseq,sstrand,qstart,qend,sstart,send,length\n"
+        "qseqid,sseqid,qlen,slen,pident,nident,gaps,evalue,qseq,sseq,sstrand,qstart,qend,sstart,send,length\n"
     )
     for res in blastn_results:
         out.write(res)
@@ -124,7 +124,7 @@ blastn_results = (
         annot.filter(feature="transcript").select(
             transcript_id="transcript_id",
             gene_id="gene_id",
-            biotype="transcript_biotype",
+            biotype="gene_biotype",
         ),
         on="transcript_id",
         how="left",
@@ -138,7 +138,13 @@ blastn_results = (
 # Select the best gene matches
 # Prioritize protein coding, then lncRNA and takes the best evalue
 best_matches = (
-    blastn_results.filter(~pl.col("biotype_is_pseudogene"))
+    blastn_results.filter(
+        ~pl.col("biotype_is_pseudogene"),
+        pl.col("length") / pl.min("qlen", "slen")
+        > 0.5,  # must cover at least half the domain
+        pl.col("length") > 150,  # super short isn't relevant regardless
+        pl.col("pident") > 0.75,  # mostly matching
+    )
     .sort(
         "pseudogene_id",
         pl.col("biotype") == "protein_coding",
@@ -155,6 +161,9 @@ best_matches = (
         pl.col("pident").first(),
         pl.col("nident").first(),
         pl.col("gaps").first(),
+        pl.col("length").first(),
+        pl.col("qlen").first(),
+        pl.col("slen").first(),
         n_gene_matches=pl.col("gene_id").n_unique(),
         all_gene_matches=pl.col("gene_id").unique(),
     )
