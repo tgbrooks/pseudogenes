@@ -12,7 +12,7 @@ def _():
     import simple_gtf
     import lets_plot as lp
 
-    return json, mo, pl, simple_gtf
+    return json, lp, mo, pl, simple_gtf
 
 
 @app.cell(hide_code=True)
@@ -149,7 +149,7 @@ def _(annot, pl):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Similarity to parent gene
+    # Sequence similarity to parent gene
     """)
     return
 
@@ -166,6 +166,33 @@ def _(gene_mapping, pl):
         length_frac = pl.col("length") / pl.col("slen"),
         pident = "pident",
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Alignment of simulated reads
+    """)
+    return
+
+
+@app.cell
+def _(lp, pl):
+    alignment_results = pl.read_csv("results/BEERS_STAR_alignment_by_transcript.txt", separator="\t")
+    _data = (
+        alignment_results
+            .filter(
+                pl.col("n_unique") + pl.col("n_multi") + pl.col("n_unmapped") > 100
+            ).drop_nulls(subset=["gene_id"])
+            .with_columns(
+                pl.when(pl.col('is_pseudogene')).then(pl.lit("pseudogene")).otherwise(pl.lit("gene")).alias("class")
+            )
+        .filter(pl.len().over("gene_biotype") >= 5)
+    )
+    _p2 = lp.ggplot(_data, lp.aes(x="gene_biotype", y = "p_multi", color="is_pseudogene")) + lp.geom_boxplot()
+    _p2 + lp.ggsize(width=800,height=550) + lp.theme(axis_text_x = lp.element_text(angle = 45, hjust = 1, vjust = 1)) \
+        + lp.labs(y = "percent multimappers", x="")
     return
 
 
