@@ -1,0 +1,9 @@
+{
+    "HUMAN_GTF": "/project/itmatlab/genomes/human/GRCh38/Ensembl.v115/Homo_sapiens.GRCh38.115.gtf.gz",
+    "HUMAN_FA": "/project/itmatlab/genomes/human/GRCh38/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
+    "HUMAN_TRANSCRIPTOME_FA": [
+        "/project/itmatlab/genomes/human/GRCh38/Ensembl.v115/Homo_sapiens.GRCh38.cdna.all.fa.gz",
+        "/project/itmatlab/genomes/human/GRCh38/Ensembl.v115/Homo_sapiens.GRCh38.ncrna.fa.gz"
+    ],
+    "HUMAN_STAR_INDEX": "/project/itmatlab/index/STAR-2.7.10b_indexes/GRCh38.ensemblv115"
+}

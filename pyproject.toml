@@ -1,0 +1,20 @@
+[project]
+name = "pseudogenes"
+version = "0.1.0"
+description = "Investigation into pseudogenes and their impact on RNA-seq quantification"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ipython>=9.13.0",
+    "lets-plot>=4.9.0",
+    "marimo==0.20.4",
+    "numpy>=2.4.3",
+    "polars>=1.39.0",
+    "simple-gtf",
+    "snakemake>=9.16.3",
+    "snakemake-executor-plugin-lsf",
+]
+
+[tool.uv.sources]
+snakemake-executor-plugin-lsf = { git = "ssh://git@github.com/tgbrooks/snakemake-executor-plugin-lsf.git", rev = "3f792d70fd01f2a7eb45f23625e398b7dc0321e5" }
+simple-gtf = { git = "https://github.com/tgbrooks/simple_gtf" }
