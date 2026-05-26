@@ -6,5 +6,11 @@
         "/project/itmatlab/genomes/human/GRCh38/Ensembl.v115/Homo_sapiens.GRCh38.ncrna.fa.gz"
     ],
     "HUMAN_STAR_INDEX": "/project/itmatlab/index/STAR-2.7.10b_indexes/GRCh38.ensemblv115",
-    "MOUSE_GTF": "/project/itmatlab/genomes/mouse/GRCm39/Ensembl.v114/Mus_musculus.GRCm39.114.gtf.gz"
+    "MOUSE_FA": "/project/itmatlab/genomes/mouse/GRCm39/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz",
+    "MOUSE_TRANSCRIPTOME_FA": [
+        "/project/itmatlab/genomes/mouse/GRCm39/Ensembl.v114/Mus_musculus.GRCm39.cdna.all.fa.gz",
+        "/project/itmatlab/genomes/mouse/GRCm39/Ensembl.v114/Mus_musculus.GRCm39.ncrna.fa.gz"
+    ],
+    "MOUSE_GTF": "/project/itmatlab/genomes/mouse/GRCm39/Ensembl.v114/Mus_musculus.GRCm39.114.gtf.gz",
+    "MOUSE_GRCm38_GTF": "/project/itmatlab/genomes/mouse/GRCm38/Ensembl.v102/Mus_musculus.GRCm38.102.gtf"
 }

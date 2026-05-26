@@ -1,13 +1,29 @@
 import json
 import gzip
 import subprocess
+import argparse
 
 import polars as pl
 import simple_gtf
 
-config = json.load(open("config.json", "rt"))
+parser = argparse.ArgumentParser("generate pseudogene map")
+parser.add_argument("--species")
+args = parser.parse_args()
 
-annot_raw = simple_gtf.read_gtf(config["HUMAN_GTF"])
+species = args.species
+
+config = json.load(open("config.json", "rt"))
+if species == "human":
+    GTF = config["HUMAN_GTF"]
+    TRANSCRIPTOME_FA = config["HUMAN_TRANSCRIPTOME_FA"]
+elif species == "mouse":
+    GTF = config["MOUSE_GTF"]
+    TRANSCRIPTOME_FA = config["MOUSE_TRANSCRIPTOME_FA"]
+else:
+    raise NotImplementedError("Unrecognized species")
+
+
+annot_raw = simple_gtf.read_gtf(GTF)
 
 # Annotations are read into lists but many types only ever have one entry, so we collapse them
 singular_columns = [
@@ -39,11 +55,11 @@ biotype_summary = (
     .sort("gene_count")
 )
 
-biotype_summary.write_csv("data/biotype_summary.txt", separator="\t")
+biotype_summary.write_csv(f"data/{species}.biotype_summary.txt", separator="\t")
 
 ## Read in the transcriptome
 transcriptome_sequences = {}
-for fasta_file in config["HUMAN_TRANSCRIPTOME_FA"]:
+for fasta_file in TRANSCRIPTOME_FA:
     with gzip.open(fasta_file, "rt") as fasta:
         working_id = None
         working_seq = []
@@ -85,7 +101,7 @@ assert pseudogene_transcripts.select(
     have_all_sequences=pl.col("full_tx_id").is_in(transcriptome_sequences.keys()).all()
 )["have_all_sequences"][0]
 
-PSEUDOGENE_SEQ_FILE = "processed/pseudogene_sequence.fa.gz"
+PSEUDOGENE_SEQ_FILE = f"processed/{species}/pseudogene_sequence.fa.gz"
 with gzip.open(PSEUDOGENE_SEQ_FILE, "wt") as pseudogene_seq_file:
     for tx_id in pseudogene_transcripts["full_tx_id"]:
         seq = transcriptome_sequences[tx_id]
@@ -95,9 +111,9 @@ with gzip.open(PSEUDOGENE_SEQ_FILE, "wt") as pseudogene_seq_file:
 
 ######################################################################
 # Align by blastn to the full transcriptome to get similarity to genes
-BLASTN_RESULTS_FILE = "processed/pseudogene_blastn.csv"
+BLASTN_RESULTS_FILE = f"processed/{species}/pseudogene_blastn.csv"
 blastn_results = []
-for i, tx_file in enumerate(config["HUMAN_TRANSCRIPTOME_FA"]):
+for i, tx_file in enumerate(TRANSCRIPTOME_FA):
     res = subprocess.run(
         f'''bash -c "blastn -subject <(zcat {tx_file}) -query <(zcat {PSEUDOGENE_SEQ_FILE}) -outfmt '10 qseqid sseqid qlen slen pident nident gaps evalue qseq sseq sstrand qstart qend sstart send length'"''',
         shell=True,
@@ -171,7 +187,7 @@ best_matches = (
 
 best_matches.with_columns(
     all_gene_matches=pl.col("all_gene_matches").list.join(";"),
-).write_csv("results/parent_gene_mapping.txt", separator="\t")
+).write_csv(f"results/{species}.parent_gene_mapping.txt", separator="\t")
 
 
 # Alternative approach we're no longer using with STAR
