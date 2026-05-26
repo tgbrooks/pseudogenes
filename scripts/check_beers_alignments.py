@@ -1,6 +1,6 @@
 import polars as pl
-import polars_bio as pb
-from util.cigar import cigar_to_ref_blocks
+import pysam
+import simple_gtf
 import json
 
 
@@ -11,72 +11,76 @@ BAM_FILE = "/home/thobr/nonuniform_impact/processed/unbiased/samples/S1/bam/Alig
 ##################################################
 # Read annotations
 config = json.load(open("config.json", "rt"))
-annot = pb.read_gtf(
-    config["MOUSE_GRCm38_GTF"],
-    attr_fields=[
-        "gene_id",
-        "gene_name",
-        "gene_biotype",
-        "transcript_id",
-        "transcript_biotype",
-        "transcript_version",
-        "exon_id",
-    ],
-)
+annot_raw = simple_gtf.read_gtf(config["MOUSE_GTF"])
 
-exons = (
-    annot.lazy()
-    .filter(type="exon")
-    .join(
-        annot.lazy().filter(type="transcript").select("transcript_id", "gene_id"),
-        how="left",
-        on="transcript_id",
-    )
-    .select("chrom", "start", "end", pl.col("gene_id").cast(pl.Categorical))
-    .sort("chrom", "start", "end")
-    .collect()
-)
+# Annotations are read into lists but many types only ever have one entry, so we collapse them
+singular_columns = [
+    "gene_id",
+    "gene_name",
+    "gene_biotype",
+    "transcript_id",
+    "transcript_biotype",
+    "transcript_version",
+    "exon_id",
+]
+for col in singular_columns:
+    assert annot_raw.select(m=pl.col(col).list.len().max())["m"][0] == 1
+annot = annot_raw.with_columns(**{c: pl.col(c).explode() for c in singular_columns})
+
 
 ##################################################
 # Go through the reads in the bam file
-bam = pb.scan_bam(BAM_FILE, tag_fields=["NH"]).select(
-    read_id="name",
-    source_transcript=pl.col("name").str.split("_").list.get(1).cast(pl.Categorical),
-    chrom="chrom",
-    start="start",
-    end="end",
-    cigar="cigar",
-    NH="NH",
+bam = pysam.AlignmentFile(BAM_FILE, "rb")
+by_transcript = {}
+for i, read in enumerate(bam):
+    # We only consider one alignment per fragment
+    if read.is_secondary:
+        continue
+    if not read.is_read1:
+        continue
+
+    transcript_id = read.qname.split(":")[6].split("_")[1]
+    if transcript_id not in by_transcript:
+        by_transcript[transcript_id] = {"n_unmapped": 0, "n_multi": 0, "n_unique": 0}
+    res = by_transcript[transcript_id]
+    if not read.is_mapped:
+        res["n_unmapped"] += 1
+    else:
+        num_loci_mapped = read.get_tag("NH")
+        if num_loci_mapped > 1:
+            res["n_multi"] += 1
+        else:
+            res["n_unique"] += 1
+    if i % 1_000_000 == 0:
+        print(".", end="", flush=True)
+print("done")
+
+results = pl.DataFrame(
+    [{"transcript_id": k, **res} for k, res in by_transcript.items()]
+).join(
+    annot.filter(feature="transcript").select(
+        "gene_id", "gene_biotype", "transcript_id"
+    ),
+    how="left",
+    on="transcript_id",
 )
 
-hits = (
-    pb.overlap(
-        cigar_to_ref_blocks(
-            bam,
-            other_cols=["read_id", "source_transcript", "NH", "chrom"],
-        ),
-        exons,
-        cols1=["chrom", "block_start", "block_end"],
+gene_results = (
+    results.group_by("gene_id", "gene_biotype")
+    .agg(
+        pl.col("n_unmapped").sum(),
+        pl.col("n_multi").sum(),
+        pl.col("n_unique").sum(),
     )
-    .select(
-        read_id="read_id_1",
-        source_transcript="source_transcript_1",
-        multimapper=pl.col("NH_1") > 1,
-        mapped_gene_id="gene_id_2",
+    .with_columns(
+        is_pseudogene=pl.col("gene_biotype").cast(str).str.contains("pseudogene"),
+        p_unmapped=pl.col("n_unmapped")
+        / (pl.col("n_unmapped") + pl.col("n_multi") + pl.col("n_unique")),
+        p_multi=pl.col("n_multi")
+        / (pl.col("n_unmapped") + pl.col("n_multi") + pl.col("n_unique")),
+        p_unique=pl.col("n_unique")
+        / (pl.col("n_unmapped") + pl.col("n_multi") + pl.col("n_unique")),
     )
-    # We only keep distinct, but to make this stream-able, we don't use unique()
-    .filter(
-        (pl.col("read_id") != pl.col("read_id").shift(1, fill_value="DUMMY VALUE"))
-        | (
-            pl.col("mapped_gene_id")
-            != pl.col("mapped_gene_id").shift(1, fill_value="DUMMY VALUE")
-        )
-    )
-    .group_by(
-        "source_transcript",
-        "mapped_gene_id",
-        "multimapper",
-    )
-    .agg(count=pl.col("read_id").n_unique())
 )
-hits.sink_csv("processed/BEERS2_transcripts_to_STAR_mapped_genes.txt", separator="\t")
+
+gene_results.write_csv("results/BEERS_STAR_alignment_by_transcript.txt", separator="\t")
