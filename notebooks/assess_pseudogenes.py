@@ -10,9 +10,10 @@ def _():
     import polars as pl
     import json
     import simple_gtf
+    import polars_bio as pb
     import lets_plot as lp
 
-    return json, lp, mo, pl, simple_gtf
+    return json, lp, mo, pb, pl, simple_gtf
 
 
 @app.cell(hide_code=True)
@@ -25,7 +26,7 @@ def _(mo):
 
 @app.cell
 def _(pl):
-    gene_mapping_raw = pl.read_csv("results/parent_gene_mapping.txt", separator="\t")
+    gene_mapping_raw = pl.read_csv("results/human.parent_gene_mapping.txt", separator="\t")
     gene_mapping_raw
     return (gene_mapping_raw,)
 
@@ -49,7 +50,7 @@ def _(json, pl, simple_gtf):
     for col in singular_columns:
         assert annot_raw.select(m=pl.col(col).list.len().max())["m"][0] == 1
     annot = annot_raw.with_columns(**{c: pl.col(c).explode() for c in singular_columns})
-    return (annot,)
+    return annot, config
 
 
 @app.cell
@@ -173,6 +174,8 @@ def _(gene_mapping, pl):
 def _(mo):
     mo.md(r"""
     # Alignment of simulated reads
+
+    We use BEERS2 simulated reads from a mouse dataset to assess the potential impact of pseudogene expression on other gene types, particularly protein coding genes.
     """)
     return
 
@@ -193,6 +196,116 @@ def _(lp, pl):
     _p2 = lp.ggplot(_data, lp.aes(x="gene_biotype", y = "p_multi", color="is_pseudogene")) + lp.geom_boxplot()
     _p2 + lp.ggsize(width=800,height=550) + lp.theme(axis_text_x = lp.element_text(angle = 45, hjust = 1, vjust = 1)) \
         + lp.labs(y = "percent multimappers", x="")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Here we have checked which simulated reads map to each gene, so we have a mapping from source transcripts to which genes it mapped to.
+    """)
+    return
+
+
+@app.cell
+def _(config, pb):
+    GRCm38_annot = pb.read_gtf(
+        config["MOUSE_GRCm38_GTF"],
+        attr_fields= [
+            "gene_id",
+            "gene_name",
+            "gene_biotype",
+            "transcript_id",
+            "transcript_biotype",
+            "transcript_version",
+            "exon_id",
+        ],
+    )
+    GRCm38_transcript_annot = GRCm38_annot.filter(type ="transcript")
+    GRCm38_gene_annot = GRCm38_annot.filter(type ="gene")
+    return GRCm38_gene_annot, GRCm38_transcript_annot
+
+
+@app.cell
+def _(GRCm38_gene_annot, GRCm38_transcript_annot, pl):
+    mapping = (
+        pl.read_csv("processed/BEERS2_transcripts_to_STAR_mapped_genes.txt", separator="\t")
+        .join(
+            GRCm38_transcript_annot.select(
+                source_transcript = "transcript_id",
+                source_gene_id = "gene_id",
+            ),
+            on = "source_transcript",
+        )
+        .join(
+            GRCm38_gene_annot.select(
+                source_gene_id = "gene_id",
+                gene_name = "gene_name",
+                source_gene_biotype = "gene_biotype",
+            ),
+            on="source_gene_id"
+        )
+        .join(
+            GRCm38_gene_annot.select(
+                mapped_gene_id = "gene_id",
+                mapped_gene_name = "gene_name",
+                mapped_gene_biotype = "gene_biotype",
+            ),
+            on="mapped_gene_id"
+        )
+    )
+    from_pseudogenes = mapping.filter(pl.col("source_gene_biotype").str.contains("pseudogene"))
+    to_pseudogenes = mapping.filter(pl.col("mapped_gene_biotype").str.contains("pseudogene"))
+    #from_pseudogenes.filter(mapped_gene_biotype = "protein_coding").sort("count", descending=True)
+    return from_pseudogenes, mapping, to_pseudogenes
+
+
+@app.cell
+def _(from_pseudogenes, mapping, mo, pl):
+    total_reads = 65958848 # actually just mapped reads from samtools view -c -F 260 -q 255
+    number_of_misplaced_reads = from_pseudogenes.filter(mapped_gene_biotype = "protein_coding", multimapper=False).sort("count", descending=True).select(pl.col("count").sum()).item()
+    number_of_misplaced_reads
+    print(f"Fraction of reads misplaced: {number_of_misplaced_reads / total_reads:0.2%}")
+
+    misplaced_by_gene = mapping.filter(multimapper=False, mapped_gene_biotype="protein_coding").group_by(
+        "mapped_gene_id", "mapped_gene_name",
+    ).agg(
+        total_reads = pl.col("count").sum(),
+        misplaced_pseudogene_reads = pl.col("count").filter(pl.col("source_gene_biotype").str.contains("pseudogene")).sum()
+    ).with_columns(
+        percent_misplaced = pl.col("misplaced_pseudogene_reads") / pl.col("total_reads")
+    )
+    mo.ui.table(
+        misplaced_by_gene.sort("percent_misplaced", descending=True).filter(pl.col('total_reads') > 1000),
+        label = "Misplaced reads mapping to protein coding genes, arising from pseudogenes",
+        format_mapping = {"percent_misplaced": "{:0.2%}".format},
+        selection = None,
+    )
+    return (total_reads,)
+
+
+@app.cell
+def _(mapping, mo, pl, to_pseudogenes, total_reads):
+    number_of_misplaced_reads2 = to_pseudogenes.filter(source_gene_biotype = "protein_coding", multimapper=False).sort("count", descending=True).select(pl.col("count").sum()).item()
+    print(f"Fraction of reads misplaced: {number_of_misplaced_reads2 / total_reads:0.2%}")
+
+    misplaced_by_gene2 = mapping.filter(
+        pl.col("mapped_gene_biotype").str.contains("pseudogene"),
+        multimapper=False, 
+    ).group_by(
+        "mapped_gene_id", "mapped_gene_name",
+    ).agg(
+        total_reads = pl.col("count").sum(),
+        misplaced_protein_coding_reads = pl.col("count").filter(source_gene_biotype = "protein_coding").sum()
+    ).with_columns(
+        percent_misplaced = pl.col("misplaced_protein_coding_reads") / pl.col("total_reads")
+    )
+    mo.ui.table(
+        misplaced_by_gene2.sort("percent_misplaced", descending=True).filter(pl.col('total_reads') > 100),
+        label = "Misplaced reads mapping to pseudogenes, arising from protein coding genes",
+        format_mapping = {"percent_misplaced": "{:0.2%}".format},
+        selection = None,
+    )
     return
 
 
