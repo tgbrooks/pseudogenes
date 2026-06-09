@@ -12,5 +12,7 @@
         "/project/itmatlab/genomes/mouse/GRCm39/Ensembl.v114/Mus_musculus.GRCm39.ncrna.fa.gz"
     ],
     "MOUSE_GTF": "/project/itmatlab/genomes/mouse/GRCm39/Ensembl.v114/Mus_musculus.GRCm39.114.gtf.gz",
-    "MOUSE_GRCm38_GTF": "/project/itmatlab/genomes/mouse/GRCm38/Ensembl.v102/Mus_musculus.GRCm38.102.gtf"
+    "MOUSE_GRCm38_GTF": "/project/itmatlab/genomes/mouse/GRCm38/Ensembl.v102/Mus_musculus.GRCm38.102.gtf",
+    "MOUSE_GRCm38_SALMON_INDEX": "/project/itmatlab/index/SALMON-1.9.0_indexes/GRCm38.ensemblv102/salmon_index",
+    "PYTHON_CONTAINER": "/home/thobr/containers/auv.sif"
 }
