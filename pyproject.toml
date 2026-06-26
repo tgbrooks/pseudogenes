@@ -5,6 +5,8 @@ description = "Investigation into pseudogenes and their impact on RNA-seq quanti
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "alignment-viewer-widget",
+    "biopython>=1.87",
     "ipython>=9.13.0",
     "lets-plot>=4.9.0",
     "marimo==0.20.4",
@@ -20,3 +22,4 @@ dependencies = [
 [tool.uv.sources]
 snakemake-executor-plugin-lsf = { git = "ssh://git@github.com/tgbrooks/snakemake-executor-plugin-lsf.git", rev = "3f792d70fd01f2a7eb45f23625e398b7dc0321e5" }
 simple-gtf = { git = "https://github.com/tgbrooks/simple_gtf" }
+alignment-viewer-widget = { git = "https://github.com/tgbrooks/alignment_viewer_widget", branch = "claude/inspiring-hypatia-w914vx" }

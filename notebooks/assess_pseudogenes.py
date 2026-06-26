@@ -135,12 +135,6 @@ def _(annot, gene_mapping, pl):
     return
 
 
-@app.cell
-def _(annot, pl):
-    annot.filter(pl.col("feature").is_in(['gene', 'transcript']), gene_id = "ENSG00000279170")
-    return
-
-
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -213,6 +207,7 @@ def _(config, pb):
             "transcript_biotype",
             "transcript_version",
             "exon_id",
+            "tag",
         ],
     )
     GRCm38_transcript_annot = GRCm38_annot.filter(type ="transcript")
@@ -259,7 +254,6 @@ def _(from_pseudogenes, mapping, mo, pl):
     total_reads = 65958848 # actually just mapped reads from samtools view -c -F 260 -q 255
     number_of_misplaced_reads = from_pseudogenes.filter(mapped_gene_biotype = "protein_coding", multimapper=False).sort("count", descending=True).select(pl.col("count").sum()).item()
     number_of_misplaced_reads
-    print(f"Fraction of reads misplaced: {number_of_misplaced_reads / total_reads:0.2%}")
 
     misplaced_by_gene = mapping.filter(multimapper=False, mapped_gene_biotype="protein_coding").group_by(
         "mapped_gene_id", "mapped_gene_name",
@@ -269,19 +263,21 @@ def _(from_pseudogenes, mapping, mo, pl):
     ).with_columns(
         percent_misplaced = pl.col("misplaced_pseudogene_reads") / pl.col("total_reads")
     )
-    mo.ui.table(
-        misplaced_by_gene.sort("percent_misplaced", descending=True).filter(pl.col('total_reads') > 100),
-        label = "Misplaced reads mapping to protein coding genes, arising from pseudogenes",
-        format_mapping = {"percent_misplaced": "{:0.2%}".format},
-        selection = None,
-    )
+    mo.vstack([
+        f"SUMMARY: Fraction of reads misplaced: {number_of_misplaced_reads / total_reads:0.2%}",
+        mo.ui.table(
+            misplaced_by_gene.sort("percent_misplaced", descending=True).filter(pl.col('total_reads') > 100),
+            label = "Misplaced reads mapping to protein coding genes, arising from pseudogenes",
+            format_mapping = {"percent_misplaced": "{:0.2%}".format},
+            selection = None,
+        )
+    ])
     return (total_reads,)
 
 
 @app.cell
 def _(mapping, mo, pl, to_pseudogenes, total_reads):
     number_of_misplaced_reads2 = to_pseudogenes.filter(source_gene_biotype = "protein_coding", multimapper=False).sort("count", descending=True).select(pl.col("count").sum()).item()
-    print(f"Fraction of reads misplaced: {number_of_misplaced_reads2 / total_reads:0.2%}")
 
     misplaced_by_gene2 = mapping.filter(
         pl.col("mapped_gene_biotype").str.contains("pseudogene"),
@@ -294,12 +290,15 @@ def _(mapping, mo, pl, to_pseudogenes, total_reads):
     ).with_columns(
         percent_misplaced = pl.col("misplaced_protein_coding_reads") / pl.col("total_reads")
     )
-    mo.ui.table(
-        misplaced_by_gene2.sort("percent_misplaced", descending=True).filter(pl.col('total_reads') > 100),
-        label = "Misplaced reads mapping to pseudogenes, arising from protein coding genes",
-        format_mapping = {"percent_misplaced": "{:0.2%}".format},
-        selection = None,
-    )
+    mo.vstack([
+        f"SUMMARY: Fraction of reads misplaced: {number_of_misplaced_reads2 / total_reads:0.2%}",
+        mo.ui.table(
+            misplaced_by_gene2.sort("percent_misplaced", descending=True).filter(pl.col('total_reads') > 100),
+            label = "Misplaced reads mapping to pseudogenes, arising from protein coding genes",
+            format_mapping = {"percent_misplaced": "{:0.2%}".format},
+            selection = None,
+        )
+    ])
     return
 
 
@@ -337,7 +336,7 @@ def _(GRCm38_gene_annot, pl):
         GRCm38_gene_annot,
         on="gene_id",
     )
-    return (gene_quants,)
+    return gene_quants, salmon_quant_schema
 
 
 @app.cell
@@ -346,19 +345,17 @@ def _(gene_quants):
     return
 
 
-app._unparsable_cell(
-    r"""
-    _wide = gene_quants.pivot(
+@app.cell
+def _(gene_quants, lp, pl):
+    _wide = gene_quants.with_columns(TPM_p1 = pl.col("TPM") + 1).pivot(
         on = "type",
         index=["gene_id", "gene_biotype"],
-        values="TPM",
-    )
-    _p1 = lp.ggplot(_wide, lp.aes(y="no_pseudogenes", x="all_transcripts")) + lp.geom_pointdensity() + lp.scale_x_log10() + lp.scale_y_log10() + lp.scale_color_viridis() + lp.ggtitle("TPM before/after removing pseudogene reads") + lp.coord_fixed()
-    _p2 = lp.ggplot(_wide.filter(~pl.col("gene_biotype").str.contains("pseudogene")), lp.aes(y="no_pseudogenes", x="all_transcripts")) + lp.geom_pointdensity() + lp.scale_x_log10() + lp.scale_y_log10() + lp.scale_color_viridis() + lp.ggtitle("pseudogenes removed") + lp.coord_fixed()
-    lp.gggrid([_p1, _p2]) + lp.ggsize(1000, 500) \
-    """,
-    name="_"
-)
+        values="TPM_p1",
+    ).filter((pl.col("no_pseudogenes") > 1) | (pl.col("all_transcripts") > 1))
+    _p1 = lp.ggplot(_wide, lp.aes(y="no_pseudogenes", x="all_transcripts")) + lp.geom_pointdensity() + lp.scale_x_log10() + lp.scale_y_log10() + lp.scale_color_viridis() + lp.ggtitle("(TPM+1) before/after removing pseudogene reads") + lp.coord_fixed() + lp.labs(x="all reads", y="no pseudogene reads")
+    _p2 = lp.ggplot(_wide.filter(~pl.col("gene_biotype").str.contains("pseudogene")), lp.aes(y="no_pseudogenes", x="all_transcripts")) + lp.geom_pointdensity() + lp.scale_x_log10() + lp.scale_y_log10() + lp.scale_color_viridis() + lp.ggtitle("genes only") + lp.coord_fixed() + lp.labs(x="all reads", y="no pseudogene reads")
+    lp.gggrid([_p1, _p2]) + lp.ggsize(1000, 500)
+    return
 
 
 @app.cell
@@ -373,7 +370,7 @@ def _(pl):
 def _(gene_quants, pl, true_gene_TPM):
     def normalize(c):
         return pl.col(c) / pl.col(c).sum() * 1e6
-    
+
     TPM_wide = gene_quants.pivot(
         on = "type",
         index=["gene_id", "gene_biotype", "chrom"],
@@ -388,7 +385,7 @@ def _(gene_quants, pl, true_gene_TPM):
         no_pseudogenes = normalize("no_pseudogenes"),
         all_transcripts = normalize("all_transcripts"),
     )
-    return (TPM_wide,)
+    return TPM_wide, normalize
 
 
 @app.cell
@@ -400,22 +397,145 @@ def _(TPM_wide, lp, pl):
 
 
 @app.cell
-def _(TPM_wide, mo, pl):
+def _(TPM_wide, lp, mo, pl):
     # Summarize TPM performance with/without pseudogenes
-    def MARD(A,B):
+    def ARD(A,B):
         A,B = pl.col(A), pl.col(B)
-        return ((A-B).abs() / (A+B)).median()
-    mo.vstack([
-        "MARD (median absolute relative deviance) comparing true TPM to Salmon TPMs on non-pseudogenes. FASTQ either with all BEERS simulated reads or with just the non-pseudogene reads. NOTE: lower is better.",
-        TPM_wide
-            .filter(
+        return ((A-B).abs() / (A+B))
+    def MARD(A,B):
+        return ARD(A,B).median()
+    _df =  TPM_wide.filter(
                 ~pl.col("gene_biotype").str.contains("pseudogene"),
                 pl.col("true_TPM") > 10, # drop very low-expressed
             )
-            .select(
+    _ARD = pl.concat([
+        _df.select(ARD = ARD("true_TPM", "all_transcripts"), type=pl.lit("all_transcripts")).sort("ARD").with_row_index("index"),
+        _df.select(ARD = ARD("true_TPM", "no_pseudogenes"), type=pl.lit("no_pseudogenes")).sort("ARD").with_row_index("index"),
+    ])
+    mo.vstack([
+        "MARD (median absolute relative deviance) comparing true TPM to Salmon TPMs on non-pseudogenes. FASTQ either with all BEERS simulated reads or with just the non-pseudogene reads. NOTE: lower is better.",
+            _df.select(
             MARD_all_transcripts = MARD("true_TPM", "all_transcripts"),
             MARD_no_pseudogenes = MARD("true_TPM", "no_pseudogenes"),
+        ),
+        lp.ggplot(_ARD, lp.aes(x="index", y="ARD", color="type")) + lp.geom_line() + lp.xlab("gene rank")
+    ])
+    return ARD, MARD
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # 3' or 5' incomplete annotations
+    Some annotations are known to not be complete transcripts. We consider those here.
+    """)
+    return
+
+
+@app.cell
+def _(annot):
+    annot.filter(type="transcript", gene_biotype="protein_coding")['transcript_biotype'].value_counts()
+    return
+
+
+@app.cell
+def _(config, pb, pl):
+    annot2 = pb.scan_gtf(config["HUMAN_GTF"], attr_fields= [
+        "gene_id",
+        "gene_name",
+        "gene_biotype",
+        "transcript_id",
+        "transcript_biotype",
+        "transcript_version",
+        "transcript_support_level",
+        "exon_id",
+        'tag',
+    ]).filter(pl.col("type")=="transcript").collect()
+    return (annot2,)
+
+
+@app.cell
+def _(annot2, pl):
+    # "NF" tags means "not found" e.g. the transcription start site not found: mRNA_start_NF
+    annot2.filter(type="transcript", gene_biotype="protein_coding").select(pl.col("tag").str.split(",").explode())['tag'].value_counts().sort('count')
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Basic transcripts only in index
+    """)
+    return
+
+
+@app.cell
+def _(GRCm38_gene_annot, pl, salmon_quant_schema):
+    basic_quants = (pl.read_csv("processed/BEERS_basic_index/salmon/quant.genes.sf", separator="\t", schema=salmon_quant_schema)
+        .with_columns(type=pl.lit("no_pseudogenes"))
+        .rename({"Name": "gene_id"}).join(
+            GRCm38_gene_annot,
+            on="gene_id",
         )
+    )
+    return (basic_quants,)
+
+
+@app.cell
+def _(basic_quants, gene_quants, pl, true_gene_TPM):
+    basic_vs_all = pl.concat([
+        basic_quants.with_columns(type = pl.lit("basic_only")),
+        gene_quants.filter(type = "all_transcripts")
+    ]).join(
+        true_gene_TPM,
+        on="gene_id"
+    )
+    basic_vs_all
+    return (basic_vs_all,)
+
+
+@app.cell
+def _(
+    ARD,
+    MARD,
+    basic_quants,
+    basic_vs_all,
+    lp,
+    mo,
+    normalize,
+    pl,
+    true_gene_TPM,
+):
+    basic_genes = set(basic_quants['gene_id'].unique())
+    _TPM_wide = basic_vs_all.pivot(
+        on = "type",
+        index=["gene_id", "gene_biotype", "chrom"],
+        values="TPM",
+    ).join(true_gene_TPM, on="gene_id") \
+    .filter(
+        pl.col("gene_id").is_in(basic_genes)
+    ).filter(
+        # these are very high expressed and dominate TPM normalization of other genes
+        # We drop MT genes and then renormalize everything
+        pl.col("chrom") != "MT",
+    ).with_columns(
+        true_TPM = normalize("true_TPM"),
+        basic_only = normalize("basic_only"),
+        all_transcripts = normalize("all_transcripts"),
+    )
+
+    _df = _TPM_wide
+    _ARD = pl.concat([
+        _df.select(ARD = ARD("true_TPM", "all_transcripts"), type=pl.lit("all_transcripts")).sort("ARD").with_row_index("index"),
+        _df.select(ARD = ARD("true_TPM", "basic_only"), type=pl.lit("basic_only")).sort("ARD").with_row_index("index"),
+    ])
+    mo.vstack([
+        "MARD (median absolute relative deviance) comparing true TPM to Salmon TPMs on non-pseudogenes. FASTQ either with all BEERS simulated reads or with just the non-pseudogene reads. NOTE: lower is better.",
+            _df.select(
+            MARD_all_transcripts = MARD("true_TPM", "all_transcripts"),
+            MARD_basic_only = MARD("true_TPM", "basic_only"),
+        ),
+        lp.ggplot(_ARD, lp.aes(x="index", y="ARD", color="type")) + lp.geom_line() + lp.xlab("gene rank")
     ])
     return
 
